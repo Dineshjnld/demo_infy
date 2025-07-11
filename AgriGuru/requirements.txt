@@ -1,0 +1,13 @@
+streamlit
+requests
+python-dotenv
+geopy
+folium
+plotly
+beautifulsoup4
+openai-whisper
+torch
+indic-nlp-library
+transformers
+gtts
+pydub
