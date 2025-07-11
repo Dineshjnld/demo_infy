@@ -10,12 +10,12 @@ from streamlit_folium import st_folium
 # Import modules
 from modules import location, weather, maps, market, chatbot # Ensure these are correctly named
 
-# For browser location - requires streamlit_js_eval (ensure it's in requirements.txt)
+# For browser location - use streamlit_geolocation
 try:
-    from streamlit_js_eval import streamlit_js_eval, copy_to_clipboard
+    from streamlit_geolocation import streamlit_geolocation
 except ImportError:
-    streamlit_js_eval = None
-    st.warning("`streamlit-js-eval` not installed. Browser geolocation will not work. Please install it: pip install streamlit-js-eval")
+    streamlit_geolocation = None
+    st.warning("`streamlit-geolocation` not installed. Browser geolocation will not work. Please install it: pip install streamlit-geolocation")
 
 
 # Load environment variables from .env file
@@ -82,40 +82,64 @@ st.title("🌾 AgriGuru: Your Smart Farming Assistant")
 # --- 1. Location Detection and Display ---
 st.sidebar.header("📍 Location")
 
-# Button to trigger geolocation
-if streamlit_js_eval and st.sidebar.button("Detect My Location"):
-    with st.spinner("Detecting your location... Please allow browser permission."):
-        js_code = location.get_browser_location_javascript()
-        loc_js = streamlit_js_eval(js_expressions=js_code, key='GEO_LOCATION_DETECTION')
+# Button to trigger geolocation using streamlit_geolocation
+# The component itself is the "button" or trigger if not customized further.
+# It runs on first load or if its inputs change.
+# We can wrap it or use a button to gate its execution if needed,
+# but its typical use is to render it and it provides data.
 
-        if loc_js and loc_js.get("latitude") is not None:
-            lat, lon = loc_js["latitude"], loc_js["longitude"]
-            # st.sidebar.info(f"Coordinates: Lat {lat:.4f}, Lon {lon:.4f}. Fetching address...")
+st.sidebar.markdown("---") # Separator
+if streamlit_geolocation:
+    # The component will render here. If it's a button-like component, user interaction is needed.
+    # If it auto-runs, it will try to get location on each script run until value is stable or error.
+    # Using a unique key for the component can help manage its state.
+    # The component's own documentation should clarify if a button is needed or if it runs automatically.
+    # Assuming it provides a button or runs automatically and returns data:
 
-            # Using Google Geocoding first, then OSM as fallback (as per location module logic)
-            # The get_detailed_location function handles API key check and fallback logic
-            addr_details = location.get_detailed_location(lat, lon, provider="google")
+    # We can add our own button to control when we *process* the data from streamlit_geolocation
+    # if st.sidebar.button("Update/Detect My Location"):
+    # This might be better UX than auto-running on every script load.
+    # However, for simplicity of direct replacement, let's assume we just call it.
+    # The `streamlit_geolocation` component might render its own button.
 
-            if addr_details and not addr_details.get("error"):
-                st.session_state.user_location = addr_details
-                # st.sidebar.success("Location detected and address found!")
-            elif addr_details and addr_details.get("error"):
-                st.session_state.user_location = {"latitude": lat, "longitude": lon, "error": addr_details["error"]}
-                # st.sidebar.error(f"Geocoding Error: {addr_details['error']}")
-            else: # Should not happen if get_detailed_location returns consistently
-                st.session_state.user_location = {"latitude": lat, "longitude": lon, "error": "Unknown error during geocoding."}
-                # st.sidebar.error("Could not fetch address details.")
-        elif loc_js and loc_js.get("error"):
-            st.session_state.user_location = {"error": loc_js["error"]}
-            # st.sidebar.error(f"Browser Geolocation Error: {loc_js['error']}")
-        else: # loc_js is None or timeout
-            st.session_state.user_location = {"error": "Could not get location from browser (timeout or no data)."}
-            # st.sidebar.warning("Could not get location from browser.")
-    # Force a rerun to update the UI with new location data
-    st.experimental_rerun()
+    location_coords = streamlit_geolocation(key="geoloc_component_agriguru") # Use a unique key
 
+    if location_coords and location_coords.get('latitude') is not None:
+        # Check if location has changed significantly to avoid re-processing if coords are same/similar
+        # This simple check helps if streamlit_geolocation re-evaluates often.
+        should_update_location = True
+        if st.session_state.user_location and not st.session_state.user_location.get("error"):
+            if abs(st.session_state.user_location['latitude'] - location_coords['latitude']) < 0.0001 and \
+               abs(st.session_state.user_location['longitude'] - location_coords['longitude']) < 0.0001:
+                should_update_location = False
 
-# Display current location from session state
+        if should_update_location:
+            with st.spinner("Location data received. Fetching address details..."):
+                lat, lon = location_coords['latitude'], location_coords['longitude']
+                addr_details = location.get_detailed_location(lat, lon, provider="google")
+
+                if addr_details and not addr_details.get("error"):
+                    st.session_state.user_location = addr_details
+                elif addr_details and addr_details.get("error"):
+                     # Preserve coords even if geocoding fails
+                    st.session_state.user_location = {"latitude": lat, "longitude": lon, "error": addr_details["error"]}
+                else: # Should not happen
+                    st.session_state.user_location = {"latitude": lat, "longitude": lon, "error": "Unknown error during geocoding."}
+            st.experimental_rerun() # Rerun to reflect updated location immediately
+
+    elif location_coords and location_coords.get('error'):
+        # Handle errors from the component itself (e.g., permission denied)
+        if st.session_state.user_location is None or st.session_state.user_location.get("error") != location_coords['error']:
+            st.session_state.user_location = {"error": f"Geolocation Component Error: {location_coords['error']}"}
+            st.experimental_rerun()
+
+    # If location_coords is None (e.g. on first run before interaction, or if component fails silently)
+    # the existing logic below for displaying st.session_state.user_location will handle it.
+
+else:
+    st.sidebar.error("`streamlit-geolocation` component not available.")
+
+# Display current location from session state (this part remains largely the same)
 if st.session_state.user_location:
     current_loc = st.session_state.user_location
     if current_loc.get("error"):
